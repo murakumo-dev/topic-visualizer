@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Topic Visualizer</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --bg: #04060f; --accent: #7df6ff; }
+
+  body {
+    background: var(--bg);
+    color: #fff;
+    font-family: 'Noto Sans JP', sans-serif;
+    height: 100dvh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background:
+      radial-gradient(ellipse 100% 60% at 50% 110%, rgba(0,60,160,0.7) 0%, transparent 65%),
+      radial-gradient(ellipse 60% 40% at 15% 85%,  rgba(80,0,160,0.35) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 35% at 85% 80%,  rgba(0,100,180,0.35) 0%, transparent 55%);
+    pointer-events: none; z-index: 0;
+  }
+  body::after {
+    content: ''; position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none; z-index: 0;
+  }
+
+  #stage { flex: 1; position: relative; overflow: hidden; z-index: 1; }
+
+  header {
+    position: absolute; top: 22px; left: 50%;
+    transform: translateX(-50%); text-align: center;
+    z-index: 10; pointer-events: none;
+    transition: opacity 0.4s, transform 0.4s;
+  }
+  header h1 {
+    font-size: clamp(14px, 2vw, 20px); font-weight: 700;
+    letter-spacing: 0.1em; color: rgba(255,255,255,0.6);
+    text-shadow: 0 0 24px rgba(125,246,255,0.5);
+  }
+  header p {
+    font-size: clamp(9px, 1.1vw, 12px); color: rgba(255,255,255,0.25);
+    letter-spacing: 0.2em; margin-top: 4px; text-transform: uppercase;
+  }
+
+  /* ── USER COUNT ── */
+  #user-count {
+    position: fixed; top: 18px; left: 16px;
+    z-index: 100; display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: rgba(255,255,255,0.45);
+    letter-spacing: 0.05em; transition: opacity 0.4s;
+  }
+  #user-count .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #4dff9e; box-shadow: 0 0 8px #4dff9e;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.5; transform: scale(0.8); }
+  }
+  body.view-mode #user-count { opacity: 0; pointer-events: none; }
+
+  /* ── TOP-RIGHT BUTTONS ── */
+  .top-btn {
+    position: fixed; top: 16px;
+    z-index: 100; width: 38px; height: 38px; border-radius: 50%;
+    border: 1.5px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.07);
+    backdrop-filter: blur(10px);
+    color: rgba(255,255,255,0.7); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.2s, border-color 0.2s, transform 0.15s, box-shadow 0.2s;
+  }
+  .top-btn:hover {
+    background: rgba(255,255,255,0.14);
+    border-color: rgba(125,246,255,0.5);
+    box-shadow: 0 0 12px rgba(125,246,255,0.3);
+    transform: scale(1.08);
+  }
+  .top-btn:active { transform: scale(0.93); }
+
+  #view-toggle { right: 16px; }
+  #history-toggle { right: 62px; }
+
+  /* badge on history button */
+  #history-toggle { position: fixed; }
+  #hist-badge {
+    position: absolute; top: -3px; right: -3px;
+    min-width: 16px; height: 16px; border-radius: 8px;
+    background: var(--accent); color: #04060f;
+    font-size: 9px; font-weight: 700;
+    display: none; align-items: center; justify-content: center;
+    padding: 0 3px; line-height: 1;
+    box-shadow: 0 0 8px rgba(125,246,255,0.6);
+  }
+  #hist-badge.visible { display: flex; }
+
+  /* icon switching */
+  #view-toggle .icon-view { display: block; }
+  #view-toggle .icon-edit { display: none; }
+  body.view-mode #view-toggle .icon-view { display: none; }
+  body.view-mode #view-toggle .icon-edit { display: block; }
+
+  /* ── VIEW MODE transitions ── */
+  #input-area, header, #floor-glow, #hint {
+    transition: opacity 0.4s ease, transform 0.4s ease,
+                max-height 0.4s ease, padding 0.4s ease, border-width 0.4s ease;
+  }
+  #input-area { max-height: 200px; overflow: hidden; }
+
+  body.view-mode header      { opacity: 0; transform: translateX(-50%) translateY(-12px); }
+  body.view-mode #floor-glow { opacity: 0; }
+  body.view-mode #hint       { opacity: 0 !important; }
+  body.view-mode #input-area {
+    opacity: 0; transform: translateY(20px);
+    pointer-events: none; max-height: 0;
+    padding-top: 0; padding-bottom: 0; border-top-width: 0;
+  }
+  body.view-mode #view-toggle,
+  body.view-mode #history-toggle { opacity: 0.35; }
+  body.view-mode #view-toggle:hover,
+  body.view-mode #history-toggle:hover { opacity: 1; }
+
+  /* ── HISTORY PANEL ── */
+  #history-panel {
+    position: fixed; top: 0; right: 0; bottom: 0;
+    width: min(340px, 90vw);
+    background: rgba(6, 9, 22, 0.97);
+    backdrop-filter: blur(20px);
+    border-left: 1px solid rgba(255,255,255,0.08);
+    z-index: 200;
+    display: flex; flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: -20px 0 60px rgba(0,0,0,0.6);
+  }
+  #history-panel.open { transform: translateX(0); }
+
+  #history-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 20px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    flex-shrink: 0;
+  }
+  #history-header h2 {
+    font-size: 14px; font-weight: 700;
+    color: rgba(255,255,255,0.7); letter-spacing: 0.08em;
+  }
+  #history-header span {
+    font-size: 11px; color: rgba(255,255,255,0.3); margin-left: 8px;
+  }
+  #history-close {
+    width: 28px; height: 28px; border-radius: 50%; border: none;
+    background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.5);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+  }
+  #history-close:hover { background: rgba(255,255,255,0.14); color: #fff; }
+
+  #history-list {
+    flex: 1; overflow-y: auto; padding: 12px 0;
+  }
+  #history-list::-webkit-scrollbar { width: 3px; }
+  #history-list::-webkit-scrollbar-track { background: transparent; }
+  #history-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+  .history-item {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 10px 20px;
+    transition: background 0.15s;
+    animation: slideIn 0.25s ease-out;
+  }
+  .history-item:hover { background: rgba(255,255,255,0.04); }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(12px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .hist-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    margin-top: 4px; flex-shrink: 0;
+  }
+  .hist-body { flex: 1; min-width: 0; }
+  .hist-text {
+    font-size: 14px; font-weight: 700;
+    color: rgba(255,255,255,0.88);
+    line-height: 1.4; word-break: break-all;
+  }
+  .hist-time {
+    font-size: 10px; color: rgba(255,255,255,0.3);
+    margin-top: 3px; letter-spacing: 0.05em;
+  }
+
+  #history-empty {
+    text-align: center; padding: 60px 20px;
+    color: rgba(255,255,255,0.2); font-size: 13px; line-height: 2;
+  }
+
+  /* overlay to close panel on outside click */
+  #history-overlay {
+    display: none; position: fixed; inset: 0; z-index: 190;
+  }
+  #history-overlay.active { display: block; }
+
+  /* ── BUBBLE ── */
+  .bubble {
+    position: absolute; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; cursor: default;
+    will-change: transform, opacity;
+  }
+  .bubble-shell { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; }
+  .bubble-hi1 {
+    position: absolute; width: 38%; height: 24%; border-radius: 50%;
+    background: rgba(255,255,255,0.85);
+    top: 10%; left: 14%;
+    filter: blur(4px); pointer-events: none; transform: rotate(-28deg);
+  }
+  .bubble-hi2 {
+    position: absolute; width: 14%; height: 9%; border-radius: 50%;
+    background: rgba(255,255,255,0.6);
+    bottom: 18%; right: 17%;
+    filter: blur(2px); pointer-events: none;
+  }
+  .bubble-text {
+    position: relative; z-index: 2;
+    color: #fff; font-weight: 700;
+    text-shadow:
+      0 0 8px rgba(0,0,0,0.95),
+      0 1px 3px rgba(0,0,0,1), 0 -1px 3px rgba(0,0,0,1),
+      1px 0 3px rgba(0,0,0,1), -1px 0 3px rgba(0,0,0,1),
+      0 0 20px rgba(255,255,255,0.5);
+    line-height: 1.45; padding: 13%;
+    word-break: break-all; pointer-events: none; user-select: none;
+  }
+
+  /* ── FLOOR / INPUT ── */
+  #floor-glow {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 160px;
+    background: linear-gradient(to top, rgba(4,6,15,1) 0%, transparent 100%);
+    pointer-events: none; z-index: 8;
+  }
+  #input-area {
+    position: relative; z-index: 20;
+    padding: 14px 18px 18px;
+    background: rgba(4,6,15,0.97);
+    display: flex; gap: 10px; align-items: center;
+    border-top: 1px solid rgba(255,255,255,0.07);
+    box-shadow: 0 -20px 40px rgba(0,0,0,0.5);
+  }
+  #text-input {
+    flex: 1;
+    background: rgba(255,255,255,0.06);
+    border: 1.5px solid rgba(255,255,255,0.16);
+    border-radius: 50px; padding: 12px 22px;
+    color: #fff; font-family: inherit; font-size: 15px;
+    outline: none; backdrop-filter: blur(12px);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    caret-color: var(--accent);
+  }
+  #text-input::placeholder { color: rgba(255,255,255,0.28); }
+  #text-input:focus {
+    border-color: rgba(125,246,255,0.55);
+    box-shadow: 0 0 0 3px rgba(125,246,255,0.12);
+  }
+  #send-btn {
+    width: 48px; height: 48px; border-radius: 50%; border: none;
+    background: conic-gradient(from 0deg, #7df6ff, #a97dff, #ff7dda, #7df6ff);
+    color: #04060f; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    transition: transform 0.15s, filter 0.15s;
+    filter: brightness(1.1) drop-shadow(0 0 10px rgba(125,246,255,0.6));
+  }
+  #send-btn:hover  { transform: scale(1.12); filter: brightness(1.3) drop-shadow(0 0 16px rgba(125,246,255,0.8)); }
+  #send-btn:active { transform: scale(0.93); }
+
+  #hint {
+    position: absolute; bottom: 88px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.22); font-size: 11.5px; letter-spacing: 0.12em;
+    z-index: 9; pointer-events: none; white-space: nowrap;
+    animation: fadeHint 4s ease-out 1.5s both;
+  }
+  @keyframes fadeHint { 0%{opacity:1} 100%{opacity:0} }
+  ::-webkit-scrollbar { display: none; }
+</style>
+</head>
+<body>
+
+<!-- 左上：接続ユーザー数 -->
+<div id="user-count">
+  <span class="dot"></span>
+  <span id="count-label">1人が接続中</span>
+</div>
+
+<!-- 右上：履歴ボタン -->
+<button id="history-toggle" class="top-btn" title="履歴">
+  <span id="hist-badge"></span>
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <polyline points="12 6 12 12 16 14"/>
+  </svg>
+</button>
+
+<!-- 右上：見るモードトグル -->
+<button id="view-toggle" class="top-btn" title="見るモード">
+  <svg class="icon-view" width="18" height="18" viewBox="0 0 24 24" fill="none"
+       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+    <circle cx="12" cy="12" r="3"/>
+  </svg>
+  <svg class="icon-edit" width="18" height="18" viewBox="0 0 24 24" fill="none"
+       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+  </svg>
+</button>
+
+<!-- 履歴パネル -->
+<div id="history-overlay"></div>
+<div id="history-panel">
+  <div id="history-header">
+    <div>
+      <h2>📜 履歴</h2>
+    </div>
+    <button id="history-close">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="18" y1="6" x2="6" y2="18"/>
+        <line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
+  <div id="history-list">
+    <div id="history-empty">まだ泡がありません<br>話題を入力してみよう 💬</div>
+  </div>
+</div>
+
+<div id="stage">
+  <header>
+    <h1>Topic Visualizer</h1>
+    
+  </header>
+  <div id="floor-glow"></div>
+  <span id="hint">💬 テキストを入力して泡を飛ばそう</span>
+</div>
+
+<div id="input-area">
+  <input id="text-input" type="text" placeholder="話題を入力してください…" maxlength="30" autocomplete="off" />
+  <button id="send-btn" title="送信">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="12" y1="19" x2="12" y2="5"/>
+      <polyline points="5 12 12 5 19 12"/>
+    </svg>
+  </button>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+"use strict";
+const stage         = document.getElementById('stage');
+const inputEl       = document.getElementById('text-input');
+const sendBtn       = document.getElementById('send-btn');
+const toggleBtn     = document.getElementById('view-toggle');
+const histToggleBtn = document.getElementById('history-toggle');
+const histPanel     = document.getElementById('history-panel');
+const histOverlay   = document.getElementById('history-overlay');
+const histClose     = document.getElementById('history-close');
+const histList      = document.getElementById('history-list');
+const histEmpty     = document.getElementById('history-empty');
+const histBadge     = document.getElementById('hist-badge');
+const countLabel    = document.getElementById('count-label');
+
+// ── Socket.io ────────────────────────────────────────────
+const socket = io();
+socket.on('user-count', (n) => { countLabel.textContent = `${n}人が接続中`; });
+socket.on('bubble', (data) => {
+  spawnBubble(data.text, data.palIdx);
+  addHistory(data.text, data.palIdx, false);
+});
+
+// ── View mode ────────────────────────────────────────────
+let viewMode = false;
+toggleBtn.addEventListener('click', () => {
+  viewMode = !viewMode;
+  document.body.classList.toggle('view-mode', viewMode);
+  toggleBtn.title = viewMode ? '入力モードに戻る' : '見るモード';
+  if (!viewMode) setTimeout(() => inputEl.focus(), 420);
+});
+
+// ── History panel ────────────────────────────────────────
+let histOpen = false;
+let unreadCount = 0;
+
+function openHistory() {
+  histOpen = true;
+  histPanel.classList.add('open');
+  histOverlay.classList.add('active');
+  unreadCount = 0;
+  histBadge.textContent = '';
+  histBadge.classList.remove('visible');
+}
+function closeHistory() {
+  histOpen = false;
+  histPanel.classList.remove('open');
+  histOverlay.classList.remove('active');
+}
+
+histToggleBtn.addEventListener('click', () => histOpen ? closeHistory() : openHistory());
+histClose.addEventListener('click', closeHistory);
+histOverlay.addEventListener('click', closeHistory);
+
+function addHistory(text, pIdx, isMine) {
+  // Remove empty placeholder
+  if (histEmpty.parentNode) histEmpty.remove();
+
+  const pal = PALETTES[pIdx % PALETTES.length];
+  const [gr, gg, gb] = pal.glow;
+  const glowColor = `rgb(${gr},${gg},${gb})`;
+
+  const now = new Date();
+  const timeStr = now.getHours().toString().padStart(2,'0') + ':' +
+                  now.getMinutes().toString().padStart(2,'0') + ':' +
+                  now.getSeconds().toString().padStart(2,'0');
+
+  const item = document.createElement('div');
+  item.className = 'history-item';
+  item.innerHTML = `
+    <span class="hist-dot" style="background:${glowColor};box-shadow:0 0 6px ${glowColor};"></span>
+    <div class="hist-body">
+      <div class="hist-text">${escapeHtml(text)}</div>
+      <div class="hist-time">${timeStr}${isMine ? ' · 自分' : ' · 他のユーザー'}</div>
+    </div>`;
+
+  // Prepend (newest first)
+  histList.insertBefore(item, histList.firstChild);
+
+  // Badge when panel is closed
+  if (!histOpen) {
+    unreadCount++;
+    histBadge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+    histBadge.classList.add('visible');
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Palette ──────────────────────────────────────────────
+const PALETTES = [
+  { h: [300, 220, 180], glow: [220,  80, 255] },
+  { h: [185, 230, 145], glow: [ 80, 220, 255] },
+  { h: [ 45,  15, 290], glow: [255, 180,  50] },
+  { h: [145, 190, 230], glow: [ 80, 255, 160] },
+  { h: [275, 320, 180], glow: [180, 100, 255] },
+  { h: [ 10,  50, 270], glow: [255, 110,  80] },
+  { h: [200, 170, 320], glow: [100, 180, 255] },
+];
+
+function hsl(h, s, l, a) { return `hsla(${h},${s}%,${l}%,${a})`; }
+
+function buildStyle(pal) {
+  const [h1, h2, h3] = pal.h;
+  const [gr, gg, gb] = pal.glow;
+  const bg = `radial-gradient(circle at 50% 50%,
+    rgba(255,255,255,0.00) 0%, rgba(255,255,255,0.00) 52%,
+    ${hsl(h1,100,75,0.18)} 65%, ${hsl(h2,95,68,0.45)} 78%,
+    ${hsl(h3,90,62,0.62)} 88%, ${hsl(h1,100,80,0.72)} 95%,
+    rgba(255,255,255,0.30) 100%)`;
+  const shadow = `
+    inset -6px -6px 18px rgba(255,255,255,0.10),
+    inset  6px  6px 16px rgba(255,255,255,0.45),
+    0 0  50px rgba(${gr},${gg},${gb},0.70),
+    0 0 100px rgba(${gr},${gg},${gb},0.30),
+    0 0   5px rgba(255,255,255,0.95)`;
+  return { bg, shadow, border: `2.5px solid rgba(255,255,255,0.70)`, glow: `rgb(${gr},${gg},${gb})` };
+}
+
+// ── Bubbles ──────────────────────────────────────────────
+const bubbles = [];
+let palIdx = 0;
+
+function spawnBubble(text, forcePalIdx) {
+  text = text.trim();
+  if (!text) return;
+  const W = stage.offsetWidth, H = stage.offsetHeight;
+  const len = text.length;
+  const size = Math.min(Math.max(len * 9 + 78, 88), 235);
+  const fontSize = size < 115 ? 12 : size < 155 ? 14 : size < 190 ? 16 : 18;
+
+  const usePalIdx = (forcePalIdx !== undefined) ? forcePalIdx : palIdx++;
+  const pal = PALETTES[usePalIdx % PALETTES.length];
+  const st  = buildStyle(pal);
+
+  const margin = size * 0.55;
+  const startX = margin + Math.random() * (W - margin * 2);
+  const startY = H + size * 0.65;
+  const speed     = 48 + Math.random() * 72;
+  const swayAmp   = 1.5 + Math.random() * 5;
+  const swayFreq  = 0.12 + Math.random() * 0.20;
+  const swayPhase = Math.random() * Math.PI * 2;
+  const driftVx   = (Math.random() - 0.5) * 1.2;
+
+  const el = document.createElement('div');
+  el.className = 'bubble';
+  el.style.cssText = `width:${size}px;height:${size}px;left:${startX-size/2}px;top:${startY-size/2}px;opacity:0;transform:scale(0);`;
+
+  const shell = document.createElement('div');
+  shell.className = 'bubble-shell';
+  shell.style.cssText = `background:${st.bg};box-shadow:${st.shadow};border:${st.border};`;
+
+  const hi1 = document.createElement('div'); hi1.className = 'bubble-hi1';
+  const hi2 = document.createElement('div'); hi2.className = 'bubble-hi2';
+
+  const span = document.createElement('span');
+  span.className = 'bubble-text';
+  span.style.fontSize = fontSize + 'px';
+  span.textContent = text;
+
+  el.append(shell, hi1, hi2, span);
+  stage.appendChild(el);
+
+  bubbles.push({
+    el, size, x: startX, baseX: startX, y: startY,
+    speed, swayAmp, swayFreq, swayPhase, driftVx,
+    born: performance.now(), scale: 0, dead: false,
+  });
+}
+
+// ── RAF loop ─────────────────────────────────────────────
+let last = null;
+function loop(now) {
+  const dt = last ? Math.min((now - last) / 1000, 0.08) : 0;
+  last = now;
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    const b = bubbles[i];
+    if (b.dead) { bubbles.splice(i, 1); continue; }
+    const age = (now - b.born) / 1000;
+    b.y -= b.speed * dt;
+    b.baseX += b.driftVx * dt;
+    const swayOff = Math.sin(age * b.swayFreq * Math.PI * 2 + b.swayPhase) * b.swayAmp;
+    const curX = b.baseX + swayOff;
+    const sc = age < 0.42 ? easeOutBack(age / 0.42) : 1.0;
+    b.scale = sc;
+    b.el.style.left      = (curX - b.size / 2) + 'px';
+    b.el.style.top       = (b.y  - b.size / 2) + 'px';
+    b.el.style.transform = `scale(${sc.toFixed(4)})`;
+    b.el.style.opacity   = '1';
+    if (b.y + b.size / 2 < 0) { b.el.remove(); bubbles.splice(i, 1); }
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+function easeOutBack(t) {
+  const c1 = 1.70158, c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+
+// ── Submit ───────────────────────────────────────────────
+function submit() {
+  const val = inputEl.value.trim();
+  if (!val) return;
+  const myPalIdx = palIdx++;
+  spawnBubble(val, myPalIdx);
+  addHistory(val, myPalIdx, true);
+  socket.emit('bubble', { text: val, palIdx: myPalIdx });
+  inputEl.value = '';
+  inputEl.focus();
+}
+sendBtn.addEventListener('click', submit);
+inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+</script>
+</body>
+</html>
